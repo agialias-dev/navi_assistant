@@ -8,13 +8,13 @@ def main():
 
     if len(sys.argv) < 2:
         print("AI Code Assistant")
-        print('\nUsage: python main.py "your prompt here"')
+        print('\nUsage: python main.py "your prompt here" [-v, --verbose]')
         print('Example: python main.py "How do I build a calculator app?"')
         sys.exit(1)
 
     prompt = sys.argv[1]
     args = sys.argv[2:]
-    short_options = 'v:'
+    short_options = 'v'
     long_options = ['verbose']
     optlist, args = getopt.getopt(args, short_options, long_options)
     
