@@ -3,12 +3,23 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
+system_prompt = """
+Answer as if you were Navi from The Legend of Zelda.
+You are a helpful AI coding agent.
+When a user asks a question or makes a request, make a function call plan. You can perform the following operations:
+- List files and directories
+- Read file contents
+- Execute Python files with optional arguments
+- Write or overwrite files
+All paths you provide should be relative to the working directory. You do not need to specify the working directory in your function calls as it is automatically injected for security reasons
+"""
+
 def main():
     load_dotenv()
 
     if len(sys.argv) < 2:
         print("AI Code Assistant")
-        print('\nUsage: python main.py "your prompt here" [-v, --verbose]')
+        print('Usage: python main.py "your prompt here" [-v, --verbose]')
         print('Example: python main.py "How do I build a calculator app?"')
         sys.exit(1)
 
@@ -17,6 +28,72 @@ def main():
     short_options = 'v'
     long_options = ['verbose']
     optlist, args = getopt.getopt(args, short_options, long_options)
+
+    schema_get_files_info = types.FunctionDeclaration(
+        name="get_files_info",
+        description="Lists files in the specified directory along with their sizes, constrained to the working directory.",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "directory": types.Schema(
+                    type=types.Type.STRING,
+                    description="The directory to list files from, relative to the working directory. If not provided, lists files in the working directory itself using '.'",
+                ),
+            },
+        ),
+    )
+    schema_get_file_content = types.FunctionDeclaration(
+        name="get_file_content",
+        description="Returns the contents of a specified file, limited to 10,000 characters, and constrained to the working directory.",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "directory": types.Schema(
+                    type=types.Type.STRING,
+                    description="The location of the file to read from, relative to the working directory. Must be provided.",
+                ),
+            },
+        ),
+    )
+    schema_run_python_file = types.FunctionDeclaration(
+        name="run_python_file",
+        description="Runs the specified .py file using the python interpreter, constrained to files contained in the working directory.",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "directory": types.Schema(
+                    type=types.Type.STRING,
+                    description="The location of the file to run, relative to the working directory. Must be provided.",
+                ),
+            },
+        ),
+    )
+    schema_write_file = types.FunctionDeclaration(
+        name="write_file",
+        description="Either overwrites an existing file or creates a new file at the location specified, constrained to the working directory.",
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "directory": types.Schema(
+                    type=types.Type.STRING,
+                    description="The location to create the new file, or if that file already exists the location of the file to overwrite, relative to the working directory. must be provided.",
+                ),
+                "content": types.Schema(
+                    type=types.Type.STRING,
+                    description="The content which is to be written to the new file, or which will overwrite the existing file."
+                )
+            },
+        ),
+    )
+
+    available_functions = types.Tool(
+    function_declarations=[
+        schema_get_files_info,
+        schema_get_file_content,
+        schema_run_python_file,
+        schema_write_file
+    ]
+    )
     
     if any([opt[0]=='-v' or opt[0]=='--verbose' for opt in optlist]):
         def vprint(print_data):
@@ -35,12 +112,20 @@ def main():
 
     response = client.models.generate_content(
         model = 'gemini-2.0-flash-001',
-        contents = messages
+        contents = messages,
+        config=types.GenerateContentConfig(system_instruction=system_prompt, tools=[available_functions])
     )
-    vprint(f"User prompt:{messages}\n")
-    print(f"Response: {response.text}")
-    vprint(f"""Prompt tokens: {response.usage_metadata.prompt_token_count}
-Response tokens: {response.usage_metadata.candidates_token_count}""")
+    
+    if response.function_calls:
+        vprint(f"User prompt:{messages}\n")
+        print(f"Response: {response.text}")
+        for call in response.function_calls:
+            print(f"Calling function: {call.name}({call.args})")
+        vprint(f"Prompt tokens: {response.usage_metadata.prompt_token_count}\nResponse tokens: {response.usage_metadata.candidates_token_count}")
+    else:    
+        vprint(f"User prompt:{messages}\n")
+        print(f"Response: {response.text}")
+        vprint(f"Prompt tokens: {response.usage_metadata.prompt_token_count}\nResponse tokens: {response.usage_metadata.candidates_token_count}")
 
 if __name__ == "__main__":
     main()
