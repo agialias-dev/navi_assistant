@@ -2,6 +2,7 @@ import os, sys, getopt
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from functions.call_function import call_function
 
 system_prompt = """
 Answer as if you were Navi from The Legend of Zelda.
@@ -48,7 +49,7 @@ def main():
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
-                "directory": types.Schema(
+                "file_path": types.Schema(
                     type=types.Type.STRING,
                     description="The location of the file to read from, relative to the working directory. Must be provided.",
                 ),
@@ -56,12 +57,12 @@ def main():
         ),
     )
     schema_run_python_file = types.FunctionDeclaration(
-        name="run_python_file",
+        name="run_python",
         description="Runs the specified .py file using the python interpreter, constrained to files contained in the working directory.",
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
-                "directory": types.Schema(
+                "file_path": types.Schema(
                     type=types.Type.STRING,
                     description="The location of the file to run, relative to the working directory. Must be provided.",
                 ),
@@ -74,7 +75,7 @@ def main():
         parameters=types.Schema(
             type=types.Type.OBJECT,
             properties={
-                "directory": types.Schema(
+                "file_path": types.Schema(
                     type=types.Type.STRING,
                     description="The location to create the new file, or if that file already exists the location of the file to overwrite, relative to the working directory. must be provided.",
                 ),
@@ -96,6 +97,7 @@ def main():
     )
     
     if any([opt[0]=='-v' or opt[0]=='--verbose' for opt in optlist]):
+        verbose = True
         def vprint(print_data):
             print(print_data)
     else:
@@ -118,9 +120,11 @@ def main():
     
     if response.function_calls:
         vprint(f"User prompt:{messages}\n")
-        print(f"Response: {response.text}")
         for call in response.function_calls:
-            print(f"Calling function: {call.name}({call.args})")
+            call_result = call_function(call, verbose)
+            if not call_result.parts or not hasattr(call_result.parts[0], "function_response"):
+                raise Exception("Error: No function response in types.Content result")
+            vprint(f"-> {call_result.parts[0].function_response.response['result']}")
         vprint(f"Prompt tokens: {response.usage_metadata.prompt_token_count}\nResponse tokens: {response.usage_metadata.candidates_token_count}")
     else:    
         vprint(f"User prompt:{messages}\n")
