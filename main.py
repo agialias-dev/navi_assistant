@@ -4,32 +4,20 @@ from google import genai
 from google.genai import types
 from functions.call_function import call_function
 
-system_prompt = """
-Answer as if you were Navi from The Legend of Zelda.
-You are a helpful AI coding agent.
-When a user asks a question or makes a request, make a function call plan. You can perform the following operations:
-- List files and directories
-- Read file contents
-- Execute Python files with optional arguments
-- Write or overwrite files
-All paths you provide should be relative to the working directory. You do not need to specify the working directory in your function calls as it is automatically injected for security reasons
-"""
-
 def main():
     load_dotenv()
-
-    if len(sys.argv) < 2:
-        print("AI Code Assistant")
-        print('Usage: python main.py "your prompt here" [-v, --verbose]')
-        print('Example: python main.py "How do I build a calculator app?"')
-        sys.exit(1)
-
-    prompt = sys.argv[1]
-    args = sys.argv[2:]
-    short_options = 'v'
-    long_options = ['verbose']
-    optlist, args = getopt.getopt(args, short_options, long_options)
-
+    api_key = os.environ.get("GEMINI_API_KEY")
+    client = genai.Client(api_key=api_key)
+    system_prompt = """
+    Answer as if you were Navi from The Legend of Zelda.
+    You are a helpful AI coding agent.
+    When a user asks a question or makes a request, make a function call plan. You can perform the following operations:
+    - List files and directories
+    - Read file contents
+    - Execute Python files with optional arguments
+    - Write or overwrite files
+    All paths you provide should be relative to the working directory (./calculator). You do not need to specify the working directory in your function calls as it is automatically injected for security reasons.
+    """
     schema_get_files_info = types.FunctionDeclaration(
         name="get_files_info",
         description="Lists files in the specified directory along with their sizes, constrained to the working directory.",
@@ -38,7 +26,7 @@ def main():
             properties={
                 "directory": types.Schema(
                     type=types.Type.STRING,
-                    description="The directory to list files from, relative to the working directory. If not provided, lists files in the working directory itself using '.'",
+                    description="The directory to list files from, relative to the working directory. Do not try to provide a working directory, is this property is not provided, it wil list files in the working directory itself.",
                 ),
             },
         ),
@@ -86,7 +74,6 @@ def main():
             },
         ),
     )
-
     available_functions = types.Tool(
     function_declarations=[
         schema_get_files_info,
@@ -95,41 +82,61 @@ def main():
         schema_write_file
     ]
     )
-    
+
+    if len(sys.argv) < 2:
+        print("AI Code Assistant")
+        print('Usage: python main.py "your prompt here" [-v, --verbose]')
+        print('Example: python main.py "How do I build a calculator app?"')
+        sys.exit(1)
+
+    prompt = sys.argv[1]
+    args = sys.argv[2:]
+    short_options = 'v'
+    long_options = ['verbose']
+    optlist, args = getopt.getopt(args, short_options, long_options)
+
     if any([opt[0]=='-v' or opt[0]=='--verbose' for opt in optlist]):
         verbose = True
         def vprint(print_data):
             print(print_data)
     else:
+        verbose = False
         def vprint(print_data):
             pass
-    
-    
-    api_key = os.environ.get("GEMINI_API_KEY")
-    client = genai.Client(api_key=api_key)
 
     messages = [
     types.Content(role="user", parts=[types.Part(text=prompt)])
     ]
 
-    response = client.models.generate_content(
-        model = 'gemini-2.0-flash-001',
-        contents = messages,
-        config=types.GenerateContentConfig(system_instruction=system_prompt, tools=[available_functions])
-    )
-    
-    if response.function_calls:
-        vprint(f"User prompt:{messages}\n")
-        for call in response.function_calls:
-            call_result = call_function(call, verbose)
-            if not call_result.parts or not hasattr(call_result.parts[0], "function_response"):
-                raise Exception("Error: No function response in types.Content result")
-            vprint(f"-> {call_result.parts[0].function_response.response['result']}")
-        vprint(f"Prompt tokens: {response.usage_metadata.prompt_token_count}\nResponse tokens: {response.usage_metadata.candidates_token_count}")
-    else:    
-        vprint(f"User prompt:{messages}\n")
-        print(f"Response: {response.text}")
-        vprint(f"Prompt tokens: {response.usage_metadata.prompt_token_count}\nResponse tokens: {response.usage_metadata.candidates_token_count}")
+    loop = 0
+    while loop <= int(os.environ.get("MAXIMUM_LOOPS")):
+        loop += 1
+        response = client.models.generate_content(
+            model = 'gemini-2.0-flash-001',
+            contents = messages,
+            config=types.GenerateContentConfig(system_instruction=system_prompt, tools=[available_functions])
+        )
+        if response.function_calls:
+            for candidate in response.candidates:
+                messages.append(candidate.content)
+            vprint(f"User prompt:{messages}\n")
+            for call in response.function_calls:
+                call_result = call_function(call, verbose)
+                if not call_result.parts or not hasattr(call_result.parts[0], "function_response"):
+                    raise Exception("Error: No function response in types.Content result")
+                vprint(f"-> {call_result.parts[0].function_response.response['result']}")
+            vprint(f"Prompt tokens: {response.usage_metadata.prompt_token_count}\nResponse tokens: {response.usage_metadata.candidates_token_count}")
+            messages.append(call_result)
+        elif not response.function_calls:
+            vprint(f"User prompt:{messages}\n")
+            print(f"Response: {response.text}")
+            vprint(f"Prompt tokens: {response.usage_metadata.prompt_token_count}\nResponse tokens: {response.usage_metadata.candidates_token_count}")
+            break
+        elif loop == 21:
+            vprint(f"User prompt:{messages}\n")
+            print(f"Maximum number of loops exceeded and execution was halted.")
+            vprint(f"Prompt tokens: {response.usage_metadata.prompt_token_count}\nResponse tokens: {response.usage_metadata.candidates_token_count}")
+            break
 
 if __name__ == "__main__":
     main()

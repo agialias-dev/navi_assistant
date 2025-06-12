@@ -1,12 +1,14 @@
+import os
 from google.genai import types
+from dotenv import load_dotenv
 from .get_file_content import get_file_content
 from .get_files_info import get_files_info
 from .run_python import run_python_file
 from .write_file import write_file
 
-working_dir = {"working_directory": "./calculator"}
-
 def call_function(function_call_part, verbose=False):
+    load_dotenv()
+    working_dir = {"working_directory": os.environ.get("WORKING_DIRECTORY")}
     func_name = function_call_part.name
     func_args = {**working_dir, **function_call_part.args}
     func_dict = {
